@@ -1150,7 +1150,7 @@ export class FluidDataStoreRuntime
 			visitedLength = visitedContexts.size;
 			for (const [contextId, context] of this.contexts) {
 				if (!(context instanceof LocalChannelContextBase)) {
-					throw new LoggingError("Should only be called with local channel handles");
+					continue;
 				}
 
 				if (
