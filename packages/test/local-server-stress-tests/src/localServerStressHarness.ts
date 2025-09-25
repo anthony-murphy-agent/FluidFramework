@@ -41,6 +41,7 @@ import {
 	ConnectionState,
 	createDetachedContainer,
 	loadExistingContainer,
+	loadFrozenContainerFromPendingState,
 	type ContainerAlpha,
 } from "@fluidframework/container-loader/internal";
 import type { ConfigTypes, FluidObject, IErrorBase } from "@fluidframework/core-interfaces";
@@ -66,6 +67,7 @@ import {
 } from "@fluidframework/test-utils/internal";
 
 import { saveFluidOps } from "./baseModel.js";
+import { validateConsistencyOfAllDDS } from "./ddsOperations.js";
 import {
 	createRuntimeFactory,
 	StressDataObject,
@@ -1433,22 +1435,46 @@ function mixinRestartClientFromPendingState<TOperation extends BaseOperation>(
 			assert(sourceClientIndex !== -1, `Client ${op.sourceClientTag} not found`);
 			const sourceClient = state.clients[sourceClientIndex];
 
-			assert(
-				typeof sourceClient.container.getPendingLocalState === "function",
-				`Client ${op.sourceClientTag} does not support getPendingLocalState`,
-			);
+			// AB#46464: Add support for serializing pending state while in staging mode
+			if (sourceClient.entryPoint.inStagingMode()) {
+				sourceClient.entryPoint.exitStagingMode(true);
+			}
+
+			// in order to validate we need to disconnect to ensure
+			// no changes arrive between capturing the state and validating
+			// the state against the source container
+			sourceClient.container.disconnect();
 
 			const pendingLocalState = await sourceClient.container.getPendingLocalState();
-
-			const removed = state.clients.splice(
-				state.clients.findIndex((c) => c.tag === op.sourceClientTag),
-				1,
-			);
-			removed[0].container.dispose();
 
 			const url = await sourceClient.container.getAbsoluteUrl("");
 			assert(url !== undefined, "url of container must be available");
 
+			const frozenContainer = asLegacyAlpha(
+				await loadFrozenContainerFromPendingState({
+					codeLoader: state.codeLoader,
+					pendingLocalState,
+					request: { url },
+					urlResolver: new LocalResolver(),
+				}),
+			);
+
+			const { DefaultStressDataObject }: FluidObject<DefaultStressDataObject> | undefined =
+				(await frozenContainer.getEntryPoint()) ?? {};
+			assert(DefaultStressDataObject !== undefined, "must have entrypoint");
+
+			await validateConsistencyOfAllDDS(sourceClient, {
+				container: frozenContainer,
+				entryPoint: DefaultStressDataObject,
+				tag: `client-${Number.NaN}`,
+			});
+			frozenContainer.dispose();
+			sourceClient.container.dispose();
+
+			state.clients.splice(
+				state.clients.findIndex((c) => c.tag === op.sourceClientTag),
+				1,
+			);
 			const newClient = await loadClient(
 				state.localDeltaConnectionServer,
 				state.codeLoader,
