@@ -45,7 +45,12 @@ import {
 	type ContainerAlpha,
 	PendingLocalStateStore,
 } from "@fluidframework/container-loader/internal";
-import type { ConfigTypes, FluidObject, IErrorBase } from "@fluidframework/core-interfaces";
+import type {
+	ConfigTypes,
+	FluidObject,
+	IErrorBase,
+	ITelemetryBaseLogger,
+} from "@fluidframework/core-interfaces";
 import type { IChannel } from "@fluidframework/datastore-definitions/internal";
 import {
 	createLocalResolverCreateNewRequest,
@@ -801,7 +806,7 @@ async function runInStateWithClient<Result>(
 	}
 }
 
-function createStressLogger(seed: number) {
+function createStressLogger(seed: number): ITelemetryBaseLogger | undefined {
 	const logger = getTestLogger?.();
 	return createChildLogger({ logger, properties: { all: { seed } } });
 }
@@ -822,7 +827,7 @@ async function createDetachedClient(
 			codeDetails,
 			logger: createStressLogger(seed),
 			configProvider: {
-				getRawConfig: (name) => options.configurations?.[name],
+				getRawConfig: (name): ConfigTypes | undefined => options.configurations?.[name],
 			},
 		}),
 	);
@@ -857,7 +862,7 @@ async function loadClient(
 				codeLoader,
 				logger: createStressLogger(seed),
 				configProvider: {
-					getRawConfig: (name) => options.configurations?.[name],
+					getRawConfig: (name): ConfigTypes | undefined => options.configurations?.[name],
 				},
 				pendingLocalState,
 			}),
@@ -882,11 +887,11 @@ async function loadClient(
 	};
 }
 
-async function synchronizeClients(connectedClients: Client[]) {
+async function synchronizeClients(connectedClients: Client[]): Promise<void> {
 	return timeoutPromise((resolve, reject) => {
 		let pendingTimeout: ReturnType<typeof setTimeout> | undefined;
 
-		const rejectHandler = (error?: IErrorBase | undefined) => {
+		const rejectHandler = (error?: IErrorBase | undefined): void => {
 			const client = connectedClients.find((c) => c.container.closed || c.container.disposed);
 			if (client !== undefined) {
 				reject(
@@ -909,7 +914,7 @@ async function synchronizeClients(connectedClients: Client[]) {
 			);
 		};
 
-		const resolveHandler = () => {
+		const resolveHandler = (): void => {
 			if (!areClientsSynchronized()) {
 				return;
 			}
@@ -946,7 +951,7 @@ async function synchronizeClients(connectedClients: Client[]) {
 		// const timeout = setInterval(() => {
 		// 	resolveHandler();
 		// }, 1000);
-		const off = () => {
+		const off = (): void => {
 			// clearInterval(timeout);
 			if (pendingTimeout !== undefined) {
 				clearTimeout(pendingTimeout);
