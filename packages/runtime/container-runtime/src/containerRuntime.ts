@@ -2340,7 +2340,10 @@ export class ContainerRuntime
 
 			const defaultAction = (): void => {
 				if (summaryCollection.opsSinceLastAck > maxOpsSinceLastSummary) {
-					this.mc.logger.sendTelemetryEvent({ eventName: "SummaryStatus:Behind" });
+					this.mc.logger.sendTelemetryEvent({
+						eventName: "SummaryStatus:Behind",
+						opsWithoutSummary: summaryCollection.opsSinceLastAck,
+					});
 					// unregister default to no log on every op after falling behind
 					// and register summary ack handler to re-register this handler
 					// after successful summary
