@@ -1319,7 +1319,7 @@ export class FluidDataStoreRuntime
 		// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
 		content: any,
 		localOpMetadata: unknown,
-		squash?: boolean,
+		squash: boolean,
 	): void {
 		this.verifyNotClosed();
 
