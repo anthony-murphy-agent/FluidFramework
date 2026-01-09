@@ -7,27 +7,27 @@ import { strict as assert } from "assert";
 
 import { generatePairwiseOptions } from "@fluid-private/test-pairwise-generator";
 import { DataObject, DataObjectFactory } from "@fluidframework/aqueduct/internal";
-import {
-	type IContainer,
-	type IRuntime,
-	type IRuntimeFactory,
+import type {
+	IContainer,
+	IRuntime,
+	IRuntimeFactory,
 } from "@fluidframework/container-definitions/internal";
 import {
 	ConnectionState,
-	type ContainerAlpha,
 	createDetachedContainer,
 	loadExistingContainer,
 } from "@fluidframework/container-loader/internal";
+import type { ContainerAlpha } from "@fluidframework/container-loader/internal";
 import {
-	IContainerRuntimeOptions,
 	loadContainerRuntimeAlpha,
 } from "@fluidframework/container-runtime/internal";
-import {
-	type ConfigTypes,
-	type FluidObject,
-	type IConfigProviderBase,
-	type IErrorBase,
-	type IFluidHandle,
+import type { IContainerRuntimeOptions } from "@fluidframework/container-runtime/internal";
+import type {
+	ConfigTypes,
+	FluidObject,
+	IConfigProviderBase,
+	IErrorBase,
+	IFluidHandle,
 } from "@fluidframework/core-interfaces/internal";
 import type { SessionSpaceCompressedId } from "@fluidframework/id-compressor/internal";
 import { SharedMap } from "@fluidframework/map/internal";
