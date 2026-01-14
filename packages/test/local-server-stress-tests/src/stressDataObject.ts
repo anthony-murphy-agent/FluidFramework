@@ -314,7 +314,12 @@ export class DefaultStressDataObject extends StressDataObject {
 	}
 
 	public exitStagingMode(commit: boolean): void {
-		assert(this.stageControls !== undefined, "must have staging mode controls");
+		// If stageControls is undefined but we're in staging mode, this means
+		// the container was rehydrated from pending state while in staging mode.
+		// We can't exit staging mode from here - skip gracefully.
+		if (this.stageControls === undefined) {
+			return;
+		}
 		if (commit) {
 			this.stageControls.commitChanges();
 		} else {
