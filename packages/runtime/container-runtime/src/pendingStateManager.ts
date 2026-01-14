@@ -3,11 +3,11 @@
  * Licensed under the MIT License.
  */
 
-import {
+import type {
 	IDisposable,
 	IFluidHandle,
 	ITelemetryBaseLogger,
-} from "@fluidframework/core-interfaces";
+} from "@fluidframework/core-interfaces/internal";
 import { assert, Lazy } from "@fluidframework/core-utils/internal";
 import {
 	type ITelemetryLoggerExt,
@@ -50,7 +50,7 @@ export interface IPendingMessage {
 	 * Serialized copy of runtimeOp
 	 */
 	content: string;
-	stagedHandleCache: ReadonlySet<IFluidHandle> | undefined;
+	stagedHandleCache?: ReadonlySet<IFluidHandle> | undefined;
 	/**
 	 * The original runtime op that was submitted to the ContainerRuntime
 	 * Unless this pending message came from stashed content, in which case this is undefined at first and then deserialized from the contents string

@@ -131,11 +131,6 @@ export const AllowTombstoneRequestHeaderKey = "allowTombstone"; // Belongs in th
 
 type PendingAliasResolve = (success: boolean) => void;
 
-interface FluidDataStoreMessage {
-	content: unknown;
-	type: string;
-}
-
 /**
  * Envelope for signals not intended for the container.
  *

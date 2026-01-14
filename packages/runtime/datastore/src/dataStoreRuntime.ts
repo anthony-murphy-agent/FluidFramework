@@ -65,6 +65,7 @@ import {
 	type IFluidDataStorePolicies,
 	type MinimumVersionForCollab,
 	asLegacyAlpha,
+	type IContainerRuntimeBaseInternal,
 	currentSummarizeStepPrefix,
 	currentSummarizeStepPropertyName,
 } from "@fluidframework/runtime-definitions/internal";
@@ -1174,9 +1175,9 @@ export class FluidDataStoreRuntime
 	private visitLocalBoundContextsDuringAttach(
 		visitor: (contextId: string, context: LocalChannelContextBase) => void,
 	): void {
-		// eslint-disable-next-line import/no-deprecated
-		const runtimeExp: IContainerRuntimeBaseExperimental =
-			this.dataStoreContext.containerRuntime;
+		const runtimeExp: IContainerRuntimeBaseInternal = asLegacyAlpha(
+			this.dataStoreContext.containerRuntime,
+		);
 		assert(
 			runtimeExp.inStagingMode === true ||
 				this.visibilityState === VisibilityState.LocallyVisible,

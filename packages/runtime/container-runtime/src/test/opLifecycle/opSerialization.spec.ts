@@ -76,12 +76,12 @@ describe("opSerialization", () => {
 			const serialized = serializeOp(op);
 
 			assert(
-				!serialized.includes("foo"),
+				!serialized.content.includes("foo"),
 				"Serialized op should not include the handle's properties besides the path",
 			);
 			assert(
-				serialized.includes("__fluid_handle__") &&
-					serialized.includes(mockHandle.absolutePath),
+				serialized.content.includes("__fluid_handle__") &&
+					serialized.content.includes(mockHandle.absolutePath),
 				"Serialized op should include the handle's path and encoded form",
 			);
 		});
