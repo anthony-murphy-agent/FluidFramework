@@ -114,11 +114,9 @@ class DataObjectWithStagingMode extends DataObject {
 	 * Enumerate the data store's data, traversing handles to other DDSes and including their data as nested keys.
 	 */
 	public async enumerateDataWithHandlesResolved(): Promise<Record<string, unknown>> {
-		interface MapLike {
-			keys(): IterableIterator<string>;
-			get(key: string): unknown;
-		}
-		const loadStateInt = async (map: MapLike): Promise<Record<string, unknown>> => {
+		const loadStateInt = async (
+			map: SharedMap,
+		): Promise<Record<string, unknown>> => {
 			const state: Record<string, unknown> = {};
 			for (const key of map.keys()) {
 				const value = (state[key] = map.get(key));
@@ -126,7 +124,7 @@ class DataObjectWithStagingMode extends DataObject {
 					const obj = await value.get();
 					state[key] = await (obj instanceof DataObjectWithStagingMode
 						? obj.enumerateDataWithHandlesResolved()
-						: loadStateInt(obj as MapLike));
+						: loadStateInt(obj));
 				}
 			}
 			return state;
