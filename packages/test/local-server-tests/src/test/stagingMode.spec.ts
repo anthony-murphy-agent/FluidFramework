@@ -122,9 +122,14 @@ class DataObjectWithStagingMode extends DataObject {
 				const value = (state[key] = map.get(key));
 				if (isFluidHandle(value)) {
 					const obj = await value.get();
-					state[key] = await (obj instanceof DataObjectWithStagingMode
-						? obj.enumerateDataWithHandlesResolved()
-						: loadStateInt(obj));
+					if (obj instanceof DataObjectWithStagingMode) {
+						state[key] = await obj.enumerateDataWithHandlesResolved();
+					} else if (obj instanceof SharedMap) {
+						state[key] = await loadStateInt(obj);
+					} else {
+						// For other resolved handle types, just keep the resolved value
+						state[key] = obj;
+					}
 				}
 			}
 			return state;
