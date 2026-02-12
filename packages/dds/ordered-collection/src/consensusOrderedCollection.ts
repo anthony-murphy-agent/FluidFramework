@@ -294,6 +294,18 @@ export class ConsensusOrderedCollection<T = any>
 		const rawContentData = bufferToString(blob2, "utf8");
 		const content2 = this.deserializeValue(rawContentData, this.serializer) as T[];
 		this.data.loadFrom(content2);
+
+		// Scrub stale jobTracking entries from the snapshot. This handles the case
+		// where the snapshot includes an acquire for a client whose ClientLeave was
+		// sequenced before the acquire (so the snapshot's quorum excludes the client,
+		// but jobTracking still has the entry). The onConnect scrub handles entries
+		// added during savedOps replay, but this catches entries already in the snapshot
+		// which is needed for frozen containers that never connect.
+		this.scrubJobTrackingByQuorum();
+	}
+
+	protected onConnect(): void {
+		this.scrubJobTrackingByQuorum();
 	}
 
 	protected onDisconnect(): void {
@@ -302,6 +314,27 @@ export class ConsensusOrderedCollection<T = any>
 				this.emit("localRelease", value, false /* intentional */);
 			}
 		}
+	}
+
+	/**
+	 * Scans jobTracking for entries whose clientId is no longer in the quorum and
+	 * releases them back to the data queue. This handles the case where a new client
+	 * loads from a snapshot that already excludes a departed client's quorum entry,
+	 * but the snapshot's jobTracking still contains items acquired by that client.
+	 * Without this scrub, those items would remain stuck in jobTracking indefinitely.
+	 */
+	private scrubJobTrackingByQuorum(): void {
+		const quorum = this.runtime.getQuorum();
+		const added: T[] = [];
+		for (const [acquireId, { value, clientId }] of this.jobTracking) {
+			if (clientId !== undefined && quorum.getMember(clientId) === undefined) {
+				this.jobTracking.delete(acquireId);
+				this.data.add(value);
+				added.push(value);
+			}
+		}
+		// Raise events after all state changes.
+		added.forEach((value) => this.emit("add", value, false /* newlyAdded */));
 	}
 
 	/**
@@ -334,6 +367,18 @@ export class ConsensusOrderedCollection<T = any>
 
 				case "acquire": {
 					value = this.acquireCore(op.acquireId, messageEnvelope.clientId ?? undefined);
+					// If the acquiring client has already left the quorum, immediately release
+					// the item back to the data queue. This handles the case where a ClientLeave
+					// is sequenced before the acquire op (the removeMember handler fires before
+					// the acquire is processed, so it can't clean up the not-yet-existing entry).
+					if (
+						value !== undefined &&
+						messageEnvelope.clientId !== undefined &&
+						messageEnvelope.clientId !== null &&
+						this.runtime.getQuorum().getMember(messageEnvelope.clientId) === undefined
+					) {
+						this.releaseCore(op.acquireId);
+					}
 					break;
 				}
 

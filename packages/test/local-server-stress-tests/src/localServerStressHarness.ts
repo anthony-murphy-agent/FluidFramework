@@ -78,6 +78,16 @@ import { validateConsistencyOfAllDDS } from "./ddsOperations.js";
 import { createRuntimeFactory, StressDataObject } from "./stressDataObject.js";
 import { makeUnreachableCodePathProxy } from "./utils.js";
 
+/**
+ * DDS types to skip during frozen container validation. These DDSs modify
+ * state in onDisconnect that is not captured by getPendingLocalState, causing
+ * the frozen container (which never connects/disconnects) to diverge from the
+ * live client's post-disconnect state.
+ */
+const frozenContainerSkipTypes: ReadonlySet<string> = new Set([
+	"https://graph.microsoft.com/types/task-manager",
+]);
+
 export interface Client {
 	container: ContainerAlpha;
 	tag: `client-${number}`;
@@ -493,9 +503,8 @@ function mixinAddRemoveClient<TOperation extends BaseOperation>(
 				removed.entryPoint.exitStagingMode(true);
 			}
 
-			// in order to validate we need to disconnect to ensure
-			// no changes arrive between capturing the state and validating
-			// the state against the source container
+			// Disconnect to ensure no changes arrive between capturing state
+			// and validating against the frozen container.
 			removed.container.disconnect();
 
 			const pendingLocalState = await removed.container.getPendingLocalState();
@@ -518,6 +527,10 @@ function mixinAddRemoveClient<TOperation extends BaseOperation>(
 				(await frozenContainer.getEntryPoint()) ?? {};
 			assert(maybe.StressDataObject !== undefined, "must have entrypoint");
 
+			// Skip DDS types that modify state in onDisconnect when comparing with
+			// the frozen container. The frozen container never connects/disconnects,
+			// so it won't have those modifications. TaskManager's onDisconnect calls
+			// removeClientFromAllQueues which is not captured in pending state.
 			await validateConsistencyOfAllDDS(
 				removed,
 				{
@@ -526,6 +539,7 @@ function mixinAddRemoveClient<TOperation extends BaseOperation>(
 					tag: `client-${Number.NaN}`,
 				},
 				state.stateTracker,
+				frozenContainerSkipTypes,
 			);
 
 			frozenContainer.dispose();

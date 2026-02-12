@@ -22,6 +22,8 @@ export class ConsensusOrderedCollection<T = any> extends SharedObject<IConsensus
     protected isActive(): boolean;
     protected loadCore(storage: IChannelStorageService): Promise<void>;
     // (undocumented)
+    protected onConnect(): void;
+    // (undocumented)
     protected onDisconnect(): void;
     protected processMessagesCore(messagesCollection: IRuntimeMessageCollection): void;
     // (undocumented)
