@@ -3,8 +3,14 @@
  * Licensed under the MIT License.
  */
 
+import { GarbageCollectionFeature } from "./garbageCollection.js";
 import { SummarizerFeature } from "./summarizer.js";
 
+export {
+	GarbageCollectionFeature,
+	GarbageCollectionFeatureFactory,
+	type GarbageCollectionFeatureOptions,
+} from "./garbageCollection.js";
 export {
 	SummarizerFeature,
 	SummarizerFeatureFactory,
@@ -35,6 +41,7 @@ export {
  */
 export const Features = {
 	summarizer: SummarizerFeature,
+	garbageCollection: GarbageCollectionFeature,
 
 	// === TODO: extract these into RuntimeFeature modules ===
 	// Each currently lives inlined in ContainerRuntime; landing one means:
@@ -42,7 +49,6 @@ export const Features = {
 	// 2. Add the entry here
 	// 3. Update `ContainerRuntime` to delegate to the feature when installed
 	//
-	// garbageCollection — packages/runtime/container-runtime/src/gc/
 	// idCompressor      — runtime constructor lines that build IIdCompressor
 	// compression       — packages/runtime/container-runtime/src/opLifecycle/
 	// stagingMode       — runtime methods enterStagingMode/exitStagingMode + StagingControls plumbing

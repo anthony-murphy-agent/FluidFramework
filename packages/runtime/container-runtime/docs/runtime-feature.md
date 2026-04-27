@@ -116,9 +116,13 @@ Borrowed without modification because it solves the right problem: the engine re
 
 The two systems coexist. Same `ContainerRuntime` hosts both. Presence does not migrate. `ContainerExtension` keeps its current focused role for ephemeral, observational, signal-driven features. `RuntimeFeature` is for foundational runtime subsystems.
 
-## Findings from the summarizer spike
+## Findings from the spikes
 
-This is the feedback loop into the framework spec — what we learned by sketching summarizer end-to-end.
+Two vertical slices have been sketched: **summarizer** (first; lifecycle + op routing focus) and **garbage collection** (second; runtime-internal observability focus). Each spike was conducted by walking the existing implementation and listing every runtime capability it touches.
+
+### Findings from the summarizer spike
+
+What we learned by sketching summarizer end-to-end.
 
 ### Hooks we knew we needed
 
@@ -146,7 +150,49 @@ The summarizer code today bundles four concerns: election, heartbeat, generation
 - **Pro:** more orthogonal; a runtime that wants to participate in elections (e.g. for non-summary purposes — there's already `orderedClientElection.ts`) but not summarize is impossible today.
 - **Con:** four registry entries instead of one; harder to reason about for the common case.
 
-Spike defers. Suggest revisiting once a second feature (GC) is sketched — if GC also wants election, the case for splitting strengthens.
+Spike defers. Revisited after the GC spike (below) — GC does not need election, so the cross-feature case for splitting election out remains weak. Probably keep summarizer monolithic; revisit when a third feature (or an explicit "election as primitive" use case) emerges.
+
+### Findings from the garbage-collection spike
+
+Pushed on a different axis than summarizer: **runtime-internal observability**. Where summarizer is a snapshot-and-respond consumer, GC is a continuous observer of state changes (every node update, every blob upload, every handle binding) that maintains a live reference graph.
+
+#### Validations from existing host surface
+
+- `getMetadataValue` works for non-summarizer features (GC reads `gcConfigs` from snapshot metadata blob).
+- `registerOpHandler` works for non-summarizer features (GC handles sweep / tombstone / aborted-sweep ops).
+- `registerSummaryContributor` — **first real exerciser**; summarizer surfaced it but doesn't use it. GC contributes its summary subtree via this hook. The contract holds.
+- Empty `depends` works cleanly — GC sits at the bottom of the dependency stack with no upstream consumers reachable at install time. Validates that features at the leaves don't require special handling.
+- Cross-feature dependency edge **closes the loop**: summarizer's `depends: ["feature:garbageCollection"]` now has a real target. The engine's topo-sort would install GC before summarizer; summarizer's `getDependency("feature:garbageCollection")` would resolve.
+
+#### Hooks GC *surfaced* (not in the framework yet)
+
+- **`dispose` lifecycle phase.** GC has resources to release (timers, telemetry buffers, event subscriptions). Summarizer didn't need this — its state is reconstructible from snapshot. Action: add `dispose` to `RuntimeFeatureLifecyclePhase`. Fires on runtime shutdown, after any final `disconnect`.
+
+- **Node-activity observation.** GC observes channel-collection activity in three distinct shapes:
+  1. **Push (event):** `host.onNodeUpdated(handler)` — receive `{ nodeId, type, ... }` whenever a node mutates. Today: channel collection invokes `garbageCollector.nodeUpdated({...})` directly (containerRuntime.ts:1994, 2020, 3826).
+  2. **Pull (predicate):** `host.registerNodeFilter("isDeleted", predicate)` — runtime calls back to ask the feature whether a node should be visible. Today: `isNodeDeleted` callback (containerRuntime.ts:1998).
+  3. **Walk (visitor):** `host.walkChannelGraph(visitor)` — feature traverses the live reference graph for unreferenced-node detection. Today: dedicated runtime methods like `getGCData()`.
+
+  Open: whether to express these as one generic listenable (`host.events`, like `ExtensionHost.events`), as targeted methods (`onNodeUpdated`, etc.), or as a separate `RuntimeObservationHost` sub-interface that GC-shaped features acquire on demand. The summarizer didn't need any of this; the framework spec must decide whether to cleanly model "feature observes runtime activity" or treat GC as a special case.
+
+- **Async install or async lifecycle hooks.** GC's `initializeBaseState()` (containerRuntime.ts:2259) is async. The current `install(host)` is sync. Either `install` becomes async, or features defer all IO into lifecycle hooks (which already are async-friendly — `on(phase, callback: () => void | Promise<void>)`). The latter is preferred (sync install preserves the "all features installed before any IO" invariant) but only if GC's init can be split cleanly between sync `install` and async `loadFromSnapshot` callback. Not a blocker; flagged for the spec.
+
+#### Hooks GC *did not need* (and that's informative)
+
+- `clientDetails` — GC's election-of-summarizer-client coupling was on the summarizer side; GC itself doesn't gate on client capabilities. Confirms `clientDetails` is summarizer-driven, not universal.
+- `getQuorum` — same. Only summarizer uses it.
+- `submitRuntimeMessage` from inside `install` — GC submits ops only in response to events (`onNodeUpdated` triggers sweep), not at install time.
+
+#### Confirms hook surface area is right-shaped
+
+After two spikes the host has roughly the right granularity:
+
+- Lifecycle phase callbacks (`on(phase, ...)`) are universal.
+- Op routing (`registerOpHandler` + `submitRuntimeMessage`) is shared by features that own op types (so far: 2 of 2).
+- Summary contribution (`registerSummaryContributor`) is shared by features that contribute (1 of 2; expected).
+- Election-related (`clientDetails`, `getQuorum`) is summarizer-specific (1 of 2). Could be split into a `RuntimeMembershipHost` sub-interface that summarizer acquires; GC compiles without it.
+
+The "everything on one host" approach holds up at N=2, but if a third spike (idCompressor would be a good candidate) doesn't use the membership methods either, it's worth splitting.
 
 ## Open questions
 
@@ -166,8 +212,10 @@ Spike defers. Suggest revisiting once a second feature (GC) is sketched — if G
 
 The order I'd suggest, each as its own branch:
 
-1. Implement the engine. Real `install()` plumbing, real lifecycle driver, real dependency resolver. No real features yet — just the `summarizer` stub becoming a no-op real install. Validates the framework works.
-2. Extract one small feature end-to-end. Suggest `idCompressor` (smallest blast radius, well-encapsulated). This becomes the migration template.
-3. Extract summarizer. Largest blast radius; needs the framework to be solid first.
-4. Extract GC. Couples to summarizer via `summarizerNodeWithGc`; do them in a coordinated PR pair.
-5. Build the `pendingRehydration` feature as a *new* module against the framework. This is the original question that started the design exploration: with the framework in place, the question becomes "what does this feature's `install` look like?" — a much clearer question than "what config flag should we add?"
+1. **Resolve open questions from the GC spike.** Specifically: shape of node-activity observation hooks (push/pull/walk), and whether to add a `dispose` lifecycle phase. These are spec decisions, not implementation work — could be a single design doc PR that updates `runtimeFeature.ts` interfaces.
+2. **Spike a third feature** (idCompressor recommended) to confirm the "membership host split" intuition. If idCompressor doesn't use `clientDetails` / `getQuorum` either, split them out. Cheap to do; expensive to undo after engine ships.
+3. Implement the engine. Real `install()` plumbing, real lifecycle driver, real dependency resolver. No real features yet — just the spike stubs becoming no-op real installs. Validates the framework works.
+4. Extract one small feature end-to-end. Suggest `idCompressor` (smallest blast radius, well-encapsulated). This becomes the migration template.
+5. Extract GC. Self-contained-ish despite the deep coupling; the second spike confirmed the framework can express its needs once observation hooks exist.
+6. Extract summarizer. Largest blast radius; do *after* GC because summarizer's `depends: ["feature:garbageCollection"]` means GC must already be a real feature for the summarizer extraction to land.
+7. Build the `pendingRehydration` feature as a *new* module against the framework. This is the original question that started the design exploration: with the framework in place, the question becomes "what does this feature's `install` look like?" — a much clearer question than "what config flag should we add?"
