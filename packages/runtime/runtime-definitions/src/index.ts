@@ -18,6 +18,14 @@ export type {
 	UnknownExtensionInstantiation,
 } from "./containerExtensionProvider.js";
 export type {
+	RuntimeFeature,
+	RuntimeFeatureDefinition,
+	RuntimeFeatureFactory,
+	RuntimeFeatureHost,
+	RuntimeFeatureId,
+	RuntimeFeatureLifecyclePhase,
+} from "./runtimeFeature.js";
+export type {
 	AliasResult,
 	CreateChildSummarizerNodeFn,
 	FluidDataStoreContextInternal,
