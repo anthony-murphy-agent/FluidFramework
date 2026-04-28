@@ -26,6 +26,9 @@ import {
 	GarbageCollectionFeature,
 	GarbageCollectionFeatureFactory,
 	type GarbageCollectionFeatureOptions,
+	StagingModeFeature,
+	StagingModeFeatureFactory,
+	type StagingModeFeatureOptions,
 	SummarizerFeature,
 	SummarizerFeatureFactory,
 	type SummarizerFeatureOptions,
@@ -57,8 +60,10 @@ export function _typeChecksCompile(): {
 	registry: FeaturesRegistry;
 	summarizerEntry: RuntimeFeatureDefinition<SummarizerFeatureOptions>;
 	gcEntry: RuntimeFeatureDefinition<GarbageCollectionFeatureOptions>;
+	stagingEntry: RuntimeFeatureDefinition<StagingModeFeatureOptions>;
 	factory: RuntimeFeatureFactory<SummarizerFeatureOptions>;
 	gcFactory: RuntimeFeatureFactory<GarbageCollectionFeatureOptions>;
+	stagingFactory: RuntimeFeatureFactory<StagingModeFeatureOptions>;
 	factoryId: RuntimeFeatureId;
 	subtractive: unknown;
 	additive: ConfigBuilder;
@@ -68,6 +73,7 @@ export function _typeChecksCompile(): {
 	dep: unknown;
 	instance: RuntimeFeature;
 	gcInstance: RuntimeFeature;
+	stagingInstance: RuntimeFeature;
 	depends: readonly RuntimeFeatureId[];
 	installFn: (host: RuntimeFeatureHost) => void;
 } {
@@ -77,11 +83,15 @@ export function _typeChecksCompile(): {
 		Features.summarizer;
 	const gcEntry: RuntimeFeatureDefinition<GarbageCollectionFeatureOptions> =
 		Features.garbageCollection;
+	const stagingEntry: RuntimeFeatureDefinition<StagingModeFeatureOptions> =
+		Features.stagingMode;
 
 	// 2. Factory shape — produces a feature with the right id.
 	const factory: RuntimeFeatureFactory<SummarizerFeatureOptions> = SummarizerFeatureFactory;
 	const gcFactory: RuntimeFeatureFactory<GarbageCollectionFeatureOptions> =
 		GarbageCollectionFeatureFactory;
+	const stagingFactory: RuntimeFeatureFactory<StagingModeFeatureOptions> =
+		StagingModeFeatureFactory;
 	const factoryId: RuntimeFeatureId = factory.id;
 
 	// 3. Caller compiles — subtractive workflow using a config helper.
@@ -90,6 +100,7 @@ export function _typeChecksCompile(): {
 	// 4. Caller compiles — additive workflow with multiple features.
 	const additive = configEmpty()
 		.with(GarbageCollectionFeature, { enableGCSweep: true })
+		.with(StagingModeFeature, { autoFlushThreshold: 1000 })
 		.with(SummarizerFeature, { summaryConfigOverrides: {} });
 
 	// 5. Feature install signature — host methods are typed.
@@ -116,6 +127,7 @@ export function _typeChecksCompile(): {
 	// 6. Feature constructed via factory has the expected shape.
 	const instance: RuntimeFeature = SummarizerFeatureFactory.create({});
 	const gcInstance: RuntimeFeature = GarbageCollectionFeatureFactory.create({});
+	const stagingInstance: RuntimeFeature = StagingModeFeatureFactory.create({});
 	const depends: readonly RuntimeFeatureId[] = instance.depends;
 	const installFn: (h: RuntimeFeatureHost) => void = instance.install;
 
@@ -123,8 +135,10 @@ export function _typeChecksCompile(): {
 		registry,
 		summarizerEntry,
 		gcEntry,
+		stagingEntry,
 		factory,
 		gcFactory,
+		stagingFactory,
 		factoryId,
 		subtractive,
 		additive,
@@ -134,6 +148,7 @@ export function _typeChecksCompile(): {
 		dep,
 		instance,
 		gcInstance,
+		stagingInstance,
 		depends,
 		installFn,
 	};

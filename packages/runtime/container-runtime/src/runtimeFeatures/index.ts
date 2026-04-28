@@ -4,6 +4,7 @@
  */
 
 import { GarbageCollectionFeature } from "./garbageCollection.js";
+import { StagingModeFeature } from "./stagingMode.js";
 import { SummarizerFeature } from "./summarizer.js";
 
 export {
@@ -11,6 +12,11 @@ export {
 	GarbageCollectionFeatureFactory,
 	type GarbageCollectionFeatureOptions,
 } from "./garbageCollection.js";
+export {
+	StagingModeFeature,
+	StagingModeFeatureFactory,
+	type StagingModeFeatureOptions,
+} from "./stagingMode.js";
 export {
 	SummarizerFeature,
 	SummarizerFeatureFactory,
@@ -42,6 +48,7 @@ export {
 export const Features = {
 	summarizer: SummarizerFeature,
 	garbageCollection: GarbageCollectionFeature,
+	stagingMode: StagingModeFeature,
 
 	// === TODO: extract these into RuntimeFeature modules ===
 	// Each currently lives inlined in ContainerRuntime; landing one means:
@@ -51,10 +58,12 @@ export const Features = {
 	//
 	// idCompressor      — runtime constructor lines that build IIdCompressor
 	// compression       — packages/runtime/container-runtime/src/opLifecycle/
-	// stagingMode       — runtime methods enterStagingMode/exitStagingMode + StagingControls plumbing
 	// schemaUpgrade     — packages/runtime/container-runtime/src/documentSchema.ts
-	// pendingRehydration — depends on stagingMode; the hooks pending-state load needs (the
-	//                      original question that started this design exploration)
+	// pendingStateManager — would surface as its own feature; depended on by
+	//                       stagingMode and pendingRehydration
+	// pendingRehydration — depends on stagingMode + pendingStateManager; the hooks
+	//                      pending-state load needs (the original question that
+	//                      started this design exploration)
 } as const;
 
 /**

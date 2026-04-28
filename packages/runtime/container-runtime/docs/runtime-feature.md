@@ -118,7 +118,15 @@ The two systems coexist. Same `ContainerRuntime` hosts both. Presence does not m
 
 ## Findings from the spikes
 
-Two vertical slices have been sketched: **summarizer** (first; lifecycle + op routing focus) and **garbage collection** (second; runtime-internal observability focus). Each spike was conducted by walking the existing implementation and listing every runtime capability it touches.
+Three vertical slices have been sketched, each chosen to push on a different axis of the framework:
+
+| Spike | Axis pushed | Verdict |
+|---|---|---|
+| **summarizer** | Lifecycle phases + op routing | Confirmed core surface |
+| **garbage collection** | Runtime-internal observability | Surfaced `dispose` + node-activity hooks |
+| **staging mode** | User-facing public API + op-submit middleware | Surfaced two new hook categories |
+
+Each spike was conducted by walking the existing implementation and listing every runtime capability it touches.
 
 ### Findings from the summarizer spike
 
@@ -194,6 +202,86 @@ After two spikes the host has roughly the right granularity:
 
 The "everything on one host" approach holds up at N=2, but if a third spike (idCompressor would be a good candidate) doesn't use the membership methods either, it's worth splitting.
 
+### Findings from the staging-mode spike
+
+Pushed on a third axis: **user-facing public API**. Where summarizer and GC are invisible to consumers, staging mode is one of the most directly-used capabilities of the runtime — apps explicitly call `runtime.enterStagingMode()`, hold the returned `StageControls`, listen to `stagingModeChanged`, and decide when to commit/discard.
+
+#### Validations
+
+- **Membership-host split hypothesis confirmed at N=3.** Staging mode does not use `clientDetails`, does not use `getQuorum`. Only summarizer (1 of 3 spikes) uses these. Splitting them into a `RuntimeMembershipHost` sub-interface that summarizer-shaped features acquire on demand is now the recommended path.
+- **Snapshot independence.** Staging mode does not use `getMetadataValue` — it's purely session-local state, recreated fresh on load. Some features need persistence; some don't. The framework correctly makes `getMetadataValue` optional rather than required.
+- **No-summary-no-ops contributors are real.** Staging mode contributes nothing to the summary tree, has no own op type, doesn't observe runtime activity. A feature can install with empty `depends` and use only lifecycle phases + the new public-API hooks. Validates that the framework doesn't impose unused hooks on lean features.
+
+#### Hooks staging mode *surfaced*
+
+Two new categories, both significant:
+
+**1. Public-API contribution.** Features that consumers call directly need a way to attach methods/properties/events to the runtime they hand back to the app. Three sub-shapes:
+
+- `host.exposeRuntimeMethod(name, impl)` — method contribution (`enterStagingMode`)
+- `host.exposeRuntimeProperty(name, getter)` — property contribution (`inStagingMode`)
+- `host.exposeRuntimeEvent<T>(name)` → `Emitter<T>` — event contribution (`stagingModeChanged`)
+
+This raises a deeper design question: **type-level discoverability.** Should `runtime.enterStagingMode` only exist on the runtime's type when the staging-mode feature is installed?
+
+- **Phantom config types**: `Config<{ stagingMode: true }>` resolves to `Runtime & WithStagingMode`. Type-safe, complex, intrusive on consumers.
+- **Always-typed, runtime-throws**: methods always exist on the type; throw "feature not installed" if called when feature is absent. Simpler, loses compile-time check.
+
+The spike defers but documents both as expressible against the same `host.exposeRuntimeMethod` primitive. The choice is a separate design decision from the framework shape itself.
+
+**2. Op-submit middleware.** Staging mode tags every outgoing op with a `staged: true` flag while active. This is op-pipeline middleware — the feature transforms ops authored by *other* features (DDS ops from data stores, Summarize ops from summarizer, etc.) before they reach the wire.
+
+```ts
+host.registerOpSubmitMiddleware((op) => {
+    if (this.inStagingMode) {
+        return { ...op, metadata: { ...op.metadata, staged: true } };
+    }
+    return op;
+});
+```
+
+Open questions for the spec:
+
+- **Ordering.** Does middleware run in feature topological order? Or its own explicit pipeline ("after compression, before persistence")? Today's pipeline is hardcoded; making it composable is the unlock but also the complexity.
+- **Mutation semantics.** Functional (return-new) for safety, or in-place (faster) for the hot path? Today's code mutates.
+- **Error handling.** A middleware that throws — does the op get dropped, retried, or does the container close? Spec needs to pin this down.
+
+#### Hooks staging mode would need but the framework doesn't yet have cleanly
+
+`commitChanges` / `discardChanges` from `StageControls` reach into `PendingStateManager` to replay or discard staged batches. As a feature, staging mode needs host-mediated access:
+
+```ts
+host.localOpQueue.replay(filter);   // for commit
+host.localOpQueue.discard(filter);  // for discard
+```
+
+The cleaner alternative: **PendingStateManager itself becomes a feature** (`feature:pendingStateManager`) that staging mode lists in `depends`. PSM is heavyweight enough to warrant its own module; it would also be depended on by the future `pendingRehydration` feature. Two-tenant abstraction is meaningful.
+
+The spike leans toward PSM-as-feature. Adding it to the registry is left to the next round.
+
+#### How this connects to the original conversation thread
+
+The whole design exploration started with the question of how to expose pending-state rehydration with staging mode. That feature now has a clean shape against the framework:
+
+```ts
+{
+  id: "feature:pendingRehydration",
+  depends: ["feature:stagingMode", "feature:pendingStateManager"],
+  install(host) {
+    host.on("loadFromSnapshot", () => {
+      const stagingMode = host.getDependency("feature:stagingMode");
+      // Caller config decides whether to enter; feature observes and acts.
+      // The original "should we enter staging mode?" config flag becomes
+      // a question the consumer answers via property observation, not a
+      // framework setting. (User's design instinct from earlier in the
+      // session, validated by working all the way down.)
+    });
+  },
+}
+```
+
+The original ad-hoc PR direction (`enableStagingModeOnPendingState: true` flag on `loadContainerRuntimeAlpha`) is fully replaced by composing two features the consumer opts into.
+
 ## Open questions
 
 1. **Phantom typing of config.** Should `Config<{ summarizer: true }>` produce `Runtime & WithSummarizer` so callers know typed-statically what they have? Phase 2; spike uses runtime checks (feature absent → method throws / returns `undefined`).
@@ -210,12 +298,26 @@ The "everything on one host" approach holds up at N=2, but if a third spike (idC
 
 ## Next steps (post-spike)
 
-The order I'd suggest, each as its own branch:
+After three spikes, the spec questions are concrete enough to act on. Order by branch:
 
-1. **Resolve open questions from the GC spike.** Specifically: shape of node-activity observation hooks (push/pull/walk), and whether to add a `dispose` lifecycle phase. These are spec decisions, not implementation work — could be a single design doc PR that updates `runtimeFeature.ts` interfaces.
-2. **Spike a third feature** (idCompressor recommended) to confirm the "membership host split" intuition. If idCompressor doesn't use `clientDetails` / `getQuorum` either, split them out. Cheap to do; expensive to undo after engine ships.
-3. Implement the engine. Real `install()` plumbing, real lifecycle driver, real dependency resolver. No real features yet — just the spike stubs becoming no-op real installs. Validates the framework works.
-4. Extract one small feature end-to-end. Suggest `idCompressor` (smallest blast radius, well-encapsulated). This becomes the migration template.
-5. Extract GC. Self-contained-ish despite the deep coupling; the second spike confirmed the framework can express its needs once observation hooks exist.
-6. Extract summarizer. Largest blast radius; do *after* GC because summarizer's `depends: ["feature:garbageCollection"]` means GC must already be a real feature for the summarizer extraction to land.
-7. Build the `pendingRehydration` feature as a *new* module against the framework. This is the original question that started the design exploration: with the framework in place, the question becomes "what does this feature's `install` look like?" — a much clearer question than "what config flag should we add?"
+1. **Resolve spec questions surfaced by the spikes.** A single design-doc PR updating `runtimeFeature.ts`:
+    - Add `dispose` to `RuntimeFeatureLifecyclePhase` (GC).
+    - Decide node-activity observation shape: `host.events` listenable vs targeted methods vs sub-interface (GC).
+    - Split `RuntimeMembershipHost` (`clientDetails`, `getQuorum`) as an opt-in sub-interface — confirmed by 3 spikes, only summarizer uses them.
+    - Add public-API contribution methods: `exposeRuntimeMethod`, `exposeRuntimeProperty`, `exposeRuntimeEvent` (staging mode).
+    - Add op-submit middleware: `registerOpSubmitMiddleware`, with ordering/mutation/error semantics pinned down (staging mode).
+    - Decide on phantom-typed config vs always-typed runtime (staging mode).
+
+2. **Implement the engine.** Real `install()` plumbing, real lifecycle driver with the now-final phase list, real dependency resolver. No real features — just the spike stubs becoming no-op real installs. Validates the framework works.
+
+3. **Extract one small feature end-to-end.** `idCompressor` is the recommended migration template — small blast radius, well-encapsulated, would also serve as a 4th-spike sanity check on the membership-host split if needed.
+
+4. **Extract `pendingStateManager` as a feature.** Staging mode and pending-rehydration both depend on it. Lifting PSM into a feature module is the load-bearing prerequisite for both.
+
+5. **Extract staging mode.** Self-contained once PSM is a feature. User-facing API contributions get exercised end-to-end.
+
+6. **Extract GC.** Self-contained-ish despite the deep coupling; the GC spike confirmed the framework can express its needs once observation hooks exist.
+
+7. **Extract summarizer.** Largest blast radius; do *after* GC because summarizer's `depends: ["feature:garbageCollection"]` means GC must already be a real feature for the summarizer extraction to land.
+
+8. **Build the `pendingRehydration` feature as a *new* module against the framework.** This is the original question that started the design exploration. With the framework in place plus stagingMode and pendingStateManager extracted, the feature is straightforward: it depends on both, observes pending-state-loaded, and decides via consumer config whether to enter staging mode. The original ad-hoc `enableStagingModeOnPendingState: true` flag is fully replaced by feature composition.
